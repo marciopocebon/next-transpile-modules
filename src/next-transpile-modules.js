@@ -1,6 +1,8 @@
 const path = require('path');
 const enhancedResolve = require('enhanced-resolve');
 const pkgUp = require('pkg-up');
+const { findRootPackageJsonPath } = require('@kiwicom/monorepo-utils');
+const symlinked = require('symlinked');
 
 // Use me when needed
 // const util = require('util');
@@ -8,6 +10,19 @@ const pkgUp = require('pkg-up');
 //   console.log(util.inspect(object, { showHidden: false, depth: null }));
 // };
 
+const mainPkg = require(pkgUp.sync());
+const rootJson = findRootPackageJsonPath();
+const rootDirectory = path.dirname(rootJson);
+const symlinkedPackages = symlinked.paths(rootDirectory);
+const rootPackageJson = require(rootJson);
+const mainPackages = Object.keys({
+  ...mainPkg.dependencies,
+  ...mainPkg.peerDependencies,
+  ...rootPackageJson.dependencies,
+  ...rootPackageJson.peerDependencies,
+}).map((key) => {
+  return pkgUp.sync({ cwd: resolve(__dirname, key) });
+});
 /**
  * We create our own Node.js resolver that can ignore symlinks resolution and
  * can support PnP
@@ -34,28 +49,11 @@ const regexEqual = (x, y) => {
   );
 };
 
-const PATH_DELIMITER = '[\\\\/]'; // match 2 antislashes or one slash
-
-const safePath = (module) => module.split(/[\\\/]/g).join(PATH_DELIMITER);
-
-const generateExcludes = (modules) => {
-  return new RegExp(
-    `node_modules${PATH_DELIMITER}(?!(${modules.map(safePath).join('|')})(${PATH_DELIMITER}|$)(?!.*node_modules))`
-  );
-};
-
-const generateIncludes = (modules) => {
-  return [
-    new RegExp(`(${modules.map(safePath).join('|')})$`),
-    new RegExp(`(${modules.map(safePath).join('|')})${PATH_DELIMITER}(?!.*node_modules)`),
-  ];
-};
-
 /**
  * Resolve modules to their real paths
  * @param {string[]} modules
  */
-const generateResolvedModules = modules => {
+const generateResolvedModules = (modules) => {
   const resolvedModules = modules
     .map((module) => {
       let resolved;
@@ -70,9 +68,11 @@ const generateResolvedModules = modules => {
         throw new Error(
           `next-transpile-modules: could not resolve module "${module}". Are you sure the name of the module you are trying to transpile is correct?`
         );
+
       return resolved;
     })
     .map(path.dirname);
+
   return resolvedModules;
 };
 
@@ -206,25 +206,47 @@ const withTmInitializer = (modules = [], options = {}) => {
         if (isWebpack5) {
           const checkForTranspiledModules = (currentPath) =>
             modules.find((mod) => {
+              const isSymlinked = symlinkedPackages.find((sym) => {
+                return mod.startsWith(sym);
+              });
+              if (isSymlinked) {
+                return false;
+              }
               return currentPath.includes(path.dirname(mod)) || currentPath.includes(mod);
             });
 
           const snapshot = Object.assign({}, config.snapshot);
-          const mainPkg = require(pkgUp.sync());
-          const simpleResolve = Object.keys({ ...mainPkg.dependencies, ...mainPkg.resolutions })
-            .map((key) => {
-              return pkgUp.sync({ cwd: resolve(__dirname, key) });
-            })
-            .filter((i) => {
-              return !checkForTranspiledModules(i);
+
+          const subPackages = resolvedModules.reduce((acc, module) => {
+            const pkg = require(path.join(pkgUp.sync({ cwd: module })));
+            let allPossibleModules = Object.keys({
+              ...pkg.dependencies,
+              ...pkg.peerDependencies,
+            });
+            allPossibleModules = Array.from(new Set([...allPossibleModules]));
+
+            allPossibleModules.forEach((key) => {
+              const resolveFrom = path.dirname(pkgUp.sync({ cwd: module }));
+              try {
+                acc.push(pkgUp.sync({ cwd: resolve(resolveFrom, key) }));
+              } catch (e) {
+                console.log('error resolving', key);
+              }
             });
 
+            return acc;
+          }, []);
+
+          const cacheablePackages = Array.from(new Set([...mainPackages, ...subPackages])).filter((i) => {
+            return !checkForTranspiledModules(i);
+          });
+
           config.snapshot = Object.assign(snapshot, {
-            managedPaths: simpleResolve,
+            managedPaths: cacheablePackages,
           });
 
           config.cache = {
-            type: 'filesystem',
+            type: 'memory',
           };
         }
         // Overload the Webpack config if it was already overloaded

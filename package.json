@@ -40,8 +40,10 @@
     "webpack"
   ],
   "dependencies": {
+    "@kiwicom/monorepo-utils": "^0.24.0",
     "enhanced-resolve": "^5.3.1",
-    "pkg-up": "^3.1.0"
+    "pkg-up": "^3.1.0",
+    "symlinked": "^0.5.0"
   },
   "devDependencies": {
     "@types/jest-environment-puppeteer": "4.4.0",
