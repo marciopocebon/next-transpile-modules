@@ -116,18 +116,21 @@ const withTmInitializer = (modules = [], options = {}) => {
 
     // Generate Webpack condition for the passed modules
     // https://webpack.js.org/configuration/module/#ruleinclude
-    const match = (path) =>
-      resolvedModules.some((modulePath) => {
-        const transpiled = path.includes(modulePath);
-        logger(`${transpiled} ${path}`);
-        return transpiled;
-      });
     const match = (request) =>
       resolvedModules.some((modulePath) => {
-
-        if(request.includes('/Error/index.js')) {
-          console.log(request);
-        }
+        // try and resolve as is
+        let transpiled = request.includes(modulePath);
+        // take request and find root package
+        const resolveRequestRoot = path.dirname(pkgUp.sync({ cwd: request }));
+        if (!transpiled) transpiled = resolveRequestRoot.includes(modulePath);
+        // take transpiled module and find root package
+        const resolvePackageRoot = path.dirname(pkgUp.sync({ cwd: modulePath }));
+        if (!transpiled) transpiled = resolveRequestRoot.includes(resolvePackageRoot);
+        logger(`${transpiled} ${request}`);
+        return transpiled;
+      });
+    const match2 = (request) =>
+      resolvedModules.some((modulePath) => {
         const resolveRequestRoot = path.dirname(pkgUp.sync({ cwd: request }));
         if (resolveRequestRoot.includes(modulePath)) {
           return true;
@@ -139,25 +142,6 @@ const withTmInitializer = (modules = [], options = {}) => {
         }
 
         return request.includes(modulePath);
-      });
-
-    const unmatch = (request) =>
-      resolvedModules.every((modulePath) => {
-
-        // if(request.includes('scss')) {
-        //   console.log(request);
-        // }
-        // const resolveRequestRoot = path.dirname(pkgUp.sync({ cwd: request }));
-        // if (!resolveRequestRoot.includes(modulePath)) {
-        //   return true;
-        // }
-        // const resolvePackageRoot = path.dirname(pkgUp.sync({ cwd: modulePath }));
-        //
-        // if (!resolveRequestRoot.includes(resolvePackageRoot)) {
-        //   return true;
-        // }
-
-        !request.includes(modulePath);
       });
 
     return Object.assign({}, nextConfig, {
