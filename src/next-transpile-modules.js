@@ -64,7 +64,12 @@ const generateResolvedModules = (modules) => {
       try {
         resolved = resolve(__dirname, module);
       } catch (e) {
-        console.error(e);
+        try {
+          resolved = resolve(__dirname, path.join(module, 'package.json'));
+        } catch (fallbackError) {
+          console.error(e);
+          console.error(fallbackError);
+        }
       }
 
       if (!resolved)
@@ -95,8 +100,43 @@ const withTmInitializer = (modules = [], options = {}) => {
 
     // Generate Webpack condition for the passed modules
     // https://webpack.js.org/configuration/module/#ruleinclude
-    const match = (path) => resolvedModules.some((modulePath) => path.includes(modulePath));
-    const unmatch = (path) => resolvedModules.every((modulePath) => !path.includes(modulePath));
+    const match = (request) =>
+      resolvedModules.some((modulePath) => {
+
+        if(request.includes('/Error/index.js')) {
+          console.log(request);
+        }
+        const resolveRequestRoot = path.dirname(pkgUp.sync({ cwd: request }));
+        if (resolveRequestRoot.includes(modulePath)) {
+          return true;
+        }
+        const resolvePackageRoot = path.dirname(pkgUp.sync({ cwd: modulePath }));
+
+        if (resolveRequestRoot.includes(resolvePackageRoot)) {
+          return true;
+        }
+
+        return request.includes(modulePath);
+      });
+
+    const unmatch = (request) =>
+      resolvedModules.every((modulePath) => {
+
+        // if(request.includes('scss')) {
+        //   console.log(request);
+        // }
+        // const resolveRequestRoot = path.dirname(pkgUp.sync({ cwd: request }));
+        // if (!resolveRequestRoot.includes(modulePath)) {
+        //   return true;
+        // }
+        // const resolvePackageRoot = path.dirname(pkgUp.sync({ cwd: modulePath }));
+        //
+        // if (!resolveRequestRoot.includes(resolvePackageRoot)) {
+        //   return true;
+        // }
+
+        !request.includes(modulePath);
+      });
 
     return Object.assign({}, nextConfig, {
       webpack(config, options) {
@@ -119,7 +159,6 @@ const withTmInitializer = (modules = [], options = {}) => {
             if (!req.startsWith('.')) {
               try {
                 const resolved = resolve(__dirname, req);
-
                 if (!resolved) return false;
 
                 return resolved.includes(mod);
@@ -127,7 +166,6 @@ const withTmInitializer = (modules = [], options = {}) => {
                 return false;
               }
             }
-
             // Otherwise, for relative imports
             return path.resolve(ctx, req).includes(mod);
           });
@@ -247,8 +285,8 @@ const withTmInitializer = (modules = [], options = {}) => {
           });
 
           config.cache = {
-            type: "memory"
-          }
+            type: 'memory',
+          };
         }
         // Overload the Webpack config if it was already overloaded
         if (typeof nextConfig.webpack === 'function') {
