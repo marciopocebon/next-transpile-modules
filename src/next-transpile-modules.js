@@ -85,9 +85,18 @@ const generateResolvedModules = (modules) => {
 };
 
 /**
+ * Logger for the debug mode
+ */
+const createLogger = (enable) => {
+  return (message, force) => {
+    if (enable || force) console.info(`next-transpile-modules - ${message}`);
+  };
+};
+
+/**
  * Transpile modules with Next.js Babel configuration
  * @param {string[]} modules
- * @param {{resolveSymlinks?: boolean; unstable_webpack5?: boolean}} options
+ * @param {{resolveSymlinks?: boolean; debug?: boolean, unstable_webpack5?: boolean}} options
  */
 const withTmInitializer = (modules = [], options = {}) => {
   const withTM = (nextConfig = {}) => {
@@ -95,11 +104,24 @@ const withTmInitializer = (modules = [], options = {}) => {
 
     const resolveSymlinks = options.resolveSymlinks || false;
     const isWebpack5 = options.unstable_webpack5 || false;
+    const debug = options.debug || false;
+
+    const logger = createLogger(debug);
 
     const resolvedModules = generateResolvedModules(modules);
 
+    if (isWebpack5) logger(`WARNING experimental Webpack 5 support enabled`, true);
+
+    logger(`the following paths will get transpiled:\n${resolvedModules.map((mod) => `  - ${mod}`).join('\n')}`);
+
     // Generate Webpack condition for the passed modules
     // https://webpack.js.org/configuration/module/#ruleinclude
+    const match = (path) =>
+      resolvedModules.some((modulePath) => {
+        const transpiled = path.includes(modulePath);
+        logger(`${transpiled} ${path}`);
+        return transpiled;
+      });
     const match = (request) =>
       resolvedModules.some((modulePath) => {
 
@@ -153,12 +175,13 @@ const withTmInitializer = (modules = [], options = {}) => {
         // transpiled.
         config.resolve.symlinks = resolveSymlinks;
 
-        const hasInclude = (ctx, req) => {
+        const hasInclude = (context, request) => {
           const test = resolvedModules.some((mod) => {
             // If we the code requires/import an absolute path
-            if (!req.startsWith('.')) {
+            if (!request.startsWith('.')) {
               try {
-                const resolved = resolve(__dirname, req);
+                const resolved = resolve(__dirname, request);
+
                 if (!resolved) return false;
 
                 return resolved.includes(mod);
@@ -166,8 +189,9 @@ const withTmInitializer = (modules = [], options = {}) => {
                 return false;
               }
             }
+
             // Otherwise, for relative imports
-            return path.resolve(ctx, req).includes(mod);
+            return path.resolve(context, request).includes(mod);
           });
 
           return test;
@@ -184,8 +208,8 @@ const withTmInitializer = (modules = [], options = {}) => {
               };
             }
 
-            return (ctx, req, cb) => {
-              return hasInclude(ctx, req) ? cb() : external(ctx, req, cb);
+            return (context, request, cb) => {
+              return hasInclude(context, request) ? cb() : external(context, request, cb);
             };
           });
         }
@@ -221,7 +245,7 @@ const withTmInitializer = (modules = [], options = {}) => {
 
           if (nextCssLoader) {
             nextCssLoader.issuer.or = nextCssLoader.issuer.and ? nextCssLoader.issuer.and.concat(match) : match;
-            nextCssLoader.issuer.not = [unmatch];
+            delete nextCssLoader.issuer.not;
             delete nextCssLoader.issuer.and;
           } else {
             console.warn('next-transpile-modules: could not find default CSS rule, CSS imports may not work');
@@ -229,7 +253,7 @@ const withTmInitializer = (modules = [], options = {}) => {
 
           if (nextSassLoader) {
             nextSassLoader.issuer.or = nextSassLoader.issuer.and ? nextSassLoader.issuer.and.concat(match) : match;
-            nextSassLoader.issuer.not = [unmatch];
+            delete nextSassLoader.issuer.not;
             delete nextSassLoader.issuer.and;
           } else {
             console.warn('next-transpile-modules: could not find default SASS rule, SASS imports may not work');
